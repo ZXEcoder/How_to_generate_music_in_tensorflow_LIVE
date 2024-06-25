@@ -17,23 +17,20 @@
 Main cell which predict the next keyboard configuration
 
 """
-
 import collections
 import tensorflow as tf
-
 from deepmusic.moduleloader import ModuleLoader
 import deepmusic.songstruct as music
 
+class KeyboardCell(tf.keras.layers.Layer):
+    """ Cell which wraps the encoder/decoder network """
 
-class KeyboardCell(tf.nn.rnn_cell.RNNCell):
-    """ Cell which wrap the encoder/decoder network
-    """
-
-    def __init__(self, args):
+    def __init__(self, args, **kwargs):
+        super(KeyboardCell, self).__init__(**kwargs)
         self.args = args
         self.is_init = False
 
-        # Get the chosen enco/deco
+        # Get the chosen encoder/decoder
         self.encoder = ModuleLoader.enco_cells.build_module(self.args)
         self.decoder = ModuleLoader.deco_cells.build_module(self.args)
 
@@ -45,33 +42,28 @@ class KeyboardCell(tf.nn.rnn_cell.RNNCell):
     def output_size(self):
         raise NotImplementedError('Abstract method')
 
-    def __call__(self, prev_keyboard, prev_state, scope=None):
+    def call(self, prev_keyboard, prev_state):
         """ Run the cell at step t
         Args:
             prev_keyboard: keyboard configuration for the step t-1 (Ground truth or previous step)
             prev_state: a tuple (prev_state_enco, prev_state_deco)
-            scope: TensorFlow scope
         Return:
             Tuple: the keyboard configuration and the enco and deco states
         """
 
         # First time only (we do the initialisation here to be on the global rnn loop scope)
         if not self.is_init:
-            with tf.variable_scope('weights_keyboard_cell'):
-                # TODO: With self.args, see which network we have chosen (create map 'network name':class)
-                self.encoder.build()
-                self.decoder.build()
+            # Initialisation (create map 'network name':class)
+            self.encoder.build()
+            self.decoder.build()
 
-                prev_state = self.encoder.init_state(), self.decoder.init_state()
-                self.is_init = True
-
-        # TODO: If encoder act as VAE, we should sample here, from the previous state
+            prev_state = (self.encoder.init_state(), self.decoder.init_state())
+            self.is_init = True
 
         # Encoder/decoder network
-        with tf.variable_scope(scope or type(self).__name__):
-            with tf.variable_scope('Encoder'):
-                # TODO: Should be enco_output, enco_state
-                next_state_enco = self.encoder.get_cell(prev_keyboard, prev_state)
-            with tf.variable_scope('Decoder'):  # Reset gate and update gate.
-                next_keyboard, next_state_deco = self.decoder.get_cell(prev_keyboard, (next_state_enco, prev_state[1]))
+        # Use functional API to avoid scope issues in TensorFlow 2.x
+        next_state_enco = self.encoder.get_cell(prev_keyboard, prev_state[0])
+        next_keyboard, next_state_deco = self.decoder.get_cell(prev_keyboard, (next_state_enco, prev_state[1]))
+        
         return next_keyboard, (next_state_enco, next_state_deco)
+
